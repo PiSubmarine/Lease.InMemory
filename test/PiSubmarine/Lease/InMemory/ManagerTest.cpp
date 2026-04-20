@@ -19,8 +19,7 @@ namespace PiSubmarine::Lease::InMemory
                 .Id = Api::ResourceId{"control-main"},
                 .Policy = Api::LeasePolicy{
                     .MaxLeases = 1,
-                    .LeaseDuration = 5s,
-                    .RequiresActivation = false}};
+                    .LeaseDuration = 5s}};
         }
     }
 
@@ -32,8 +31,7 @@ namespace PiSubmarine::Lease::InMemory
             .Id = Api::ResourceId{"control-main"},
             .Policy = Api::LeasePolicy{
                 .MaxLeases = 0,
-                .LeaseDuration = 5s,
-                .RequiresActivation = false}});
+                .LeaseDuration = 5s}});
 
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().Cause, make_error_code(Api::ErrorCode::InvalidMaxLeases));
@@ -93,8 +91,7 @@ namespace PiSubmarine::Lease::InMemory
             .Id = Api::ResourceId{"telemetry-main"},
             .Policy = Api::LeasePolicy{
                 .MaxLeases = 2,
-                .LeaseDuration = 5s,
-                .RequiresActivation = true}}).has_value());
+                .LeaseDuration = 5s}}).has_value());
 
         ASSERT_TRUE(manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"telemetry-main"}}).has_value());
         ASSERT_TRUE(manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"telemetry-main"}}).has_value());
@@ -148,8 +145,7 @@ namespace PiSubmarine::Lease::InMemory
             .Id = Api::ResourceId{"video-main"},
             .Policy = Api::LeasePolicy{
                 .MaxLeases = std::nullopt,
-                .LeaseDuration = 5s,
-                .RequiresActivation = true}}).has_value());
+                .LeaseDuration = 5s}}).has_value());
 
         const auto lease = manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"control-main"}});
         ASSERT_TRUE(lease.has_value());
