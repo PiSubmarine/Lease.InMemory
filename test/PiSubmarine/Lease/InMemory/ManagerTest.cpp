@@ -2,10 +2,15 @@
 
 #include <algorithm>
 #include <cctype>
+#include <memory>
 #include <string>
+
+#include <spdlog/logger.h>
+#include <spdlog/sinks/null_sink.h>
 
 #include "PiSubmarine/Lease/InMemory/Manager.h"
 #include "PiSubmarine/Lease/Api/ErrorCode.h"
+#include "PiSubmarine/Logging/Api/IFactory.h"
 
 namespace PiSubmarine::Lease::InMemory
 {
@@ -21,11 +26,23 @@ namespace PiSubmarine::Lease::InMemory
                     .MaxLeases = 1,
                     .LeaseDuration = 5s}};
         }
+
+        class LoggerFactoryStub final : public Logging::Api::IFactory
+        {
+        public:
+            [[nodiscard]] std::shared_ptr<spdlog::logger> CreateLogger(std::string_view name) override
+            {
+                return std::make_shared<spdlog::logger>(
+                    std::string(name),
+                    std::make_shared<spdlog::sinks::null_sink_mt>());
+            }
+        };
     }
 
     TEST(ManagerTest, RegisterResourceRejectsInvalidPolicy)
     {
-        Manager manager;
+        LoggerFactoryStub loggerFactory;
+        Manager manager(loggerFactory);
 
         const auto result = manager.RegisterResource(Api::ResourceDescriptor{
             .Id = Api::ResourceId{"control-main"},
@@ -39,7 +56,8 @@ namespace PiSubmarine::Lease::InMemory
 
     TEST(ManagerTest, GetResourceReturnsRegisteredDescriptor)
     {
-        Manager manager;
+        LoggerFactoryStub loggerFactory;
+        Manager manager(loggerFactory);
         const auto descriptor = MakeExclusiveResource();
 
         ASSERT_TRUE(manager.RegisterResource(descriptor).has_value());
@@ -52,7 +70,8 @@ namespace PiSubmarine::Lease::InMemory
 
     TEST(ManagerTest, AcquireLeaseGeneratesHexEncodedOpaqueId)
     {
-        Manager manager;
+        LoggerFactoryStub loggerFactory;
+        Manager manager(loggerFactory);
         ASSERT_TRUE(manager.RegisterResource(MakeExclusiveResource()).has_value());
 
         const auto lease = manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"control-main"}});
@@ -67,7 +86,8 @@ namespace PiSubmarine::Lease::InMemory
 
     TEST(ManagerTest, AcquireLeaseRejectsSecondExclusiveLease)
     {
-        Manager manager;
+        LoggerFactoryStub loggerFactory;
+        Manager manager(loggerFactory);
         ASSERT_TRUE(manager.RegisterResource(MakeExclusiveResource()).has_value());
         ASSERT_TRUE(manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"control-main"}}).has_value());
 
@@ -80,7 +100,9 @@ namespace PiSubmarine::Lease::InMemory
     TEST(ManagerTest, AcquireLeaseAllowsSharedLeasesUpToConfiguredLimit)
     {
         std::size_t nextId = 0;
+        LoggerFactoryStub loggerFactory;
         Manager manager(
+            loggerFactory,
             [] { return std::chrono::steady_clock::time_point{}; },
             [&nextId]() -> Error::Api::Result<Api::LeaseId>
             {
@@ -106,7 +128,9 @@ namespace PiSubmarine::Lease::InMemory
     {
         auto now = std::chrono::steady_clock::time_point{};
         std::size_t nextId = 0;
+        LoggerFactoryStub loggerFactory;
         Manager manager(
+            loggerFactory,
             [&now] { return now; },
             [&nextId]() -> Error::Api::Result<Api::LeaseId>
             {
@@ -137,7 +161,9 @@ namespace PiSubmarine::Lease::InMemory
     TEST(ManagerTest, ValidateLeaseRejectsWrongResourceAndExpiredLeaseWithoutTrustingCaller)
     {
         auto now = std::chrono::steady_clock::time_point{};
+        LoggerFactoryStub loggerFactory;
         Manager manager(
+            loggerFactory,
             [&now] { return now; },
             []() -> Error::Api::Result<Api::LeaseId> { return Api::LeaseId{.Value = "forged-resistant-id"}; });
         ASSERT_TRUE(manager.RegisterResource(MakeExclusiveResource()).has_value());
@@ -162,7 +188,9 @@ namespace PiSubmarine::Lease::InMemory
 
     TEST(ManagerTest, ReleaseLeaseRemovesActiveLease)
     {
+        LoggerFactoryStub loggerFactory;
         Manager manager(
+            loggerFactory,
             [] { return std::chrono::steady_clock::time_point{}; },
             []() -> Error::Api::Result<Api::LeaseId> { return Api::LeaseId{.Value = "lease-1"}; });
         ASSERT_TRUE(manager.RegisterResource(MakeExclusiveResource()).has_value());

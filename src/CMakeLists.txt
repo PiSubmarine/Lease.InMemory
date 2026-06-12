@@ -10,4 +10,7 @@ PiSubmarineInitTarget(${PISUBMARINE_MODULE_NAME})
 
 PiSubmarineAddDependency("https://github.com/PiSubmarine/Lease.Api.git" "")
 target_link_libraries(${PISUBMARINE_MODULE_NAME} PUBLIC PiSubmarine.Lease.Api)
+
+PiSubmarineAddDependency("https://github.com/PiSubmarine/Logging.Api.git" "")
+target_link_libraries(${PISUBMARINE_MODULE_NAME} PUBLIC PiSubmarine.Logging.Api)
 target_link_libraries(${PISUBMARINE_MODULE_NAME} PRIVATE OpenSSL::Crypto)

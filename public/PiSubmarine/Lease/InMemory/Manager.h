@@ -3,12 +3,14 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
 #include "PiSubmarine/Lease/Api/ILeaseIssuer.h"
 #include "PiSubmarine/Lease/Api/ILeaseValidator.h"
 #include "PiSubmarine/Lease/Api/IResourceRegistry.h"
+#include "PiSubmarine/Logging/Api/IFactory.h"
 
 namespace PiSubmarine::Lease::InMemory
 {
@@ -21,6 +23,7 @@ namespace PiSubmarine::Lease::InMemory
 
         // Thread-safe.
         explicit Manager(
+            Logging::Api::IFactory& loggerFactory,
             Clock clock = [] { return std::chrono::steady_clock::now(); },
             LeaseIdGenerator leaseIdGenerator = {});
 
@@ -51,6 +54,7 @@ namespace PiSubmarine::Lease::InMemory
 
         Clock m_Clock;
         LeaseIdGenerator m_LeaseIdGenerator;
+        std::shared_ptr<spdlog::logger> m_Logger;
 
         mutable std::mutex m_Mutex;
         mutable std::unordered_map<std::string, ActiveLease> m_ActiveLeases;
