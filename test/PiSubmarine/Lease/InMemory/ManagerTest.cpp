@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cctype>
 #include <memory>
 #include <string>
@@ -77,11 +78,12 @@ namespace PiSubmarine::Lease::InMemory
         const auto lease = manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"control-main"}});
 
         ASSERT_TRUE(lease.has_value());
-        EXPECT_EQ(lease->Id.Value.size(), 64U);
+        EXPECT_EQ(lease->Lease.Id.Value.size(), 64U);
         EXPECT_TRUE(std::all_of(
-            lease->Id.Value.begin(),
-            lease->Id.Value.end(),
+            lease->Lease.Id.Value.begin(),
+            lease->Lease.Id.Value.end(),
             [](const char value) { return std::isxdigit(static_cast<unsigned char>(value)) != 0; }));
+        EXPECT_EQ(lease->Secret.Value.size(), 32U);
     }
 
     TEST(ManagerTest, AcquireLeaseRejectsSecondExclusiveLease)
@@ -143,16 +145,16 @@ namespace PiSubmarine::Lease::InMemory
         ASSERT_TRUE(lease.has_value());
 
         now += 4s;
-        ASSERT_TRUE(manager.RenewLease(lease->Id).has_value());
+        ASSERT_TRUE(manager.RenewLease(lease->Lease.Id).has_value());
 
         now += 4s;
-        const auto validationAfterRenew = manager.ValidateLease(lease->Id, Api::ResourceId{"control-main"});
+        const auto validationAfterRenew = manager.ValidateLease(lease->Lease.Id, Api::ResourceId{"control-main"});
 
         ASSERT_TRUE(validationAfterRenew.has_value());
         EXPECT_TRUE(validationAfterRenew->IsValid);
 
         now += 2s;
-        const auto validationAfterExpiry = manager.ValidateLease(lease->Id, Api::ResourceId{"control-main"});
+        const auto validationAfterExpiry = manager.ValidateLease(lease->Lease.Id, Api::ResourceId{"control-main"});
 
         ASSERT_TRUE(validationAfterExpiry.has_value());
         EXPECT_FALSE(validationAfterExpiry->IsValid);
@@ -176,12 +178,12 @@ namespace PiSubmarine::Lease::InMemory
         const auto lease = manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"control-main"}});
         ASSERT_TRUE(lease.has_value());
 
-        const auto wrongResource = manager.ValidateLease(lease->Id, Api::ResourceId{"video-main"});
+        const auto wrongResource = manager.ValidateLease(lease->Lease.Id, Api::ResourceId{"video-main"});
         ASSERT_TRUE(wrongResource.has_value());
         EXPECT_FALSE(wrongResource->IsValid);
 
         now += 6s;
-        const auto expired = manager.ValidateLease(lease->Id, Api::ResourceId{"control-main"});
+        const auto expired = manager.ValidateLease(lease->Lease.Id, Api::ResourceId{"control-main"});
         ASSERT_TRUE(expired.has_value());
         EXPECT_FALSE(expired->IsValid);
     }
@@ -197,11 +199,80 @@ namespace PiSubmarine::Lease::InMemory
 
         const auto lease = manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"control-main"}});
         ASSERT_TRUE(lease.has_value());
-        ASSERT_TRUE(manager.ReleaseLease(lease->Id).has_value());
+        ASSERT_TRUE(manager.ReleaseLease(lease->Lease.Id).has_value());
 
-        const auto validation = manager.ValidateLease(lease->Id, Api::ResourceId{"control-main"});
+        const auto validation = manager.ValidateLease(lease->Lease.Id, Api::ResourceId{"control-main"});
 
         ASSERT_TRUE(validation.has_value());
         EXPECT_FALSE(validation->IsValid);
+    }
+
+    TEST(ManagerTest, GetLeaseSecretReturnsAcquireSecretForActiveLease)
+    {
+        LoggerFactoryStub loggerFactory;
+        Manager manager(
+            loggerFactory,
+            [] { return std::chrono::steady_clock::time_point{}; },
+            []() -> Error::Api::Result<Api::LeaseId> { return Api::LeaseId{.Value = "lease-1"}; },
+            []() -> Error::Api::Result<Api::LeaseSecret>
+            {
+                return Api::LeaseSecret{.Value = {std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}};
+            });
+        ASSERT_TRUE(manager.RegisterResource(MakeExclusiveResource()).has_value());
+
+        const auto lease = manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"control-main"}});
+
+        ASSERT_TRUE(lease.has_value());
+        const auto secret = manager.GetLeaseSecret(lease->Lease.Id);
+
+        ASSERT_TRUE(secret.has_value());
+        EXPECT_EQ(*secret, lease->Secret);
+    }
+
+    TEST(ManagerTest, GetLeaseSecretPreservesSecretAcrossRenewalAndRemovesItAfterRelease)
+    {
+        auto now = std::chrono::steady_clock::time_point{};
+        LoggerFactoryStub loggerFactory;
+        Manager manager(
+            loggerFactory,
+            [&now] { return now; },
+            []() -> Error::Api::Result<Api::LeaseId> { return Api::LeaseId{.Value = "lease-1"}; },
+            []() -> Error::Api::Result<Api::LeaseSecret>
+            {
+                return Api::LeaseSecret{.Value = {std::byte{0x0A}, std::byte{0x0B}}};
+            });
+        ASSERT_TRUE(manager.RegisterResource(MakeExclusiveResource()).has_value());
+
+        const auto lease = manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"control-main"}});
+        ASSERT_TRUE(lease.has_value());
+
+        now += 4s;
+        ASSERT_TRUE(manager.RenewLease(lease->Lease.Id).has_value());
+
+        const auto renewedSecret = manager.GetLeaseSecret(lease->Lease.Id);
+        ASSERT_TRUE(renewedSecret.has_value());
+        EXPECT_EQ(*renewedSecret, lease->Secret);
+
+        ASSERT_TRUE(manager.ReleaseLease(lease->Lease.Id).has_value());
+
+        const auto releasedSecret = manager.GetLeaseSecret(lease->Lease.Id);
+        ASSERT_FALSE(releasedSecret.has_value());
+        EXPECT_EQ(releasedSecret.error().Cause, make_error_code(Api::ErrorCode::LeaseNotFound));
+    }
+
+    TEST(ManagerTest, AcquireLeaseRejectsEmptySecretFromGenerator)
+    {
+        LoggerFactoryStub loggerFactory;
+        Manager manager(
+            loggerFactory,
+            [] { return std::chrono::steady_clock::time_point{}; },
+            []() -> Error::Api::Result<Api::LeaseId> { return Api::LeaseId{.Value = "lease-1"}; },
+            []() -> Error::Api::Result<Api::LeaseSecret> { return Api::LeaseSecret{}; });
+        ASSERT_TRUE(manager.RegisterResource(MakeExclusiveResource()).has_value());
+
+        const auto lease = manager.AcquireLease(Api::LeaseRequest{.Resource = Api::ResourceId{"control-main"}});
+
+        ASSERT_FALSE(lease.has_value());
+        EXPECT_EQ(lease.error().Cause, make_error_code(Api::ErrorCode::InvalidLeaseSecret));
     }
 }

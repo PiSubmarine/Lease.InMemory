@@ -4,6 +4,7 @@
 #include <array>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 
 #include <openssl/rand.h>
 #include <spdlog/spdlog.h>
@@ -16,6 +17,7 @@ namespace PiSubmarine::Lease::InMemory
     namespace
     {
         constexpr std::size_t LeaseIdByteCount = 32;
+        constexpr std::size_t LeaseSecretByteCount = 32;
         constexpr std::size_t MaxLeaseIdGenerationAttempts = 8;
 
         [[nodiscard]] Error::Api::Error MakeContractError(const Api::ErrorCode code) noexcept
@@ -43,9 +45,11 @@ namespace PiSubmarine::Lease::InMemory
     Manager::Manager(
         Logging::Api::IFactory& loggerFactory,
         Clock clock,
-        LeaseIdGenerator leaseIdGenerator)
+        LeaseIdGenerator leaseIdGenerator,
+        LeaseSecretGenerator leaseSecretGenerator)
         : m_Clock(std::move(clock))
         , m_LeaseIdGenerator(std::move(leaseIdGenerator))
+        , m_LeaseSecretGenerator(std::move(leaseSecretGenerator))
         , m_Logger(CreateLogger(loggerFactory))
     {
         if (!m_LeaseIdGenerator)
@@ -53,10 +57,15 @@ namespace PiSubmarine::Lease::InMemory
             m_LeaseIdGenerator = [] { return GenerateSecureLeaseId(); };
         }
 
+        if (!m_LeaseSecretGenerator)
+        {
+            m_LeaseSecretGenerator = [] { return GenerateSecureLeaseSecret(); };
+        }
+
         SPDLOG_LOGGER_INFO(m_Logger, "Initialized in-memory lease manager");
     }
 
-    Error::Api::Result<Api::Lease> Manager::AcquireLease(const Api::LeaseRequest& request)
+    Error::Api::Result<Api::LeaseGrant> Manager::AcquireLease(const Api::LeaseRequest& request)
     {
         if (const auto resourceValidation = ValidateResourceId(request.Resource); !resourceValidation)
         {
@@ -99,6 +108,17 @@ namespace PiSubmarine::Lease::InMemory
                 return std::unexpected(leaseIdValidation.error());
             }
 
+            const auto leaseSecretResult = m_LeaseSecretGenerator();
+            if (!leaseSecretResult)
+            {
+                return std::unexpected(leaseSecretResult.error());
+            }
+
+            if (const auto leaseSecretValidation = ValidateLeaseSecret(*leaseSecretResult); !leaseSecretValidation)
+            {
+                return std::unexpected(leaseSecretValidation.error());
+            }
+
             if (m_ActiveLeases.contains(leaseIdResult->Value))
             {
                 SPDLOG_LOGGER_WARN(m_Logger, "Generated colliding lease id for resource '{}'; retrying", request.Resource.Value);
@@ -110,6 +130,7 @@ namespace PiSubmarine::Lease::InMemory
                     .Id = *leaseIdResult,
                     .Resource = request.Resource,
                     .Duration = resource.Policy.LeaseDuration},
+                .Secret = *leaseSecretResult,
                 .ExpiresAt = now + resource.Policy.LeaseDuration};
             m_ActiveLeases.emplace(activeLease.Lease.Id.Value, activeLease);
             SPDLOG_LOGGER_INFO(
@@ -118,7 +139,9 @@ namespace PiSubmarine::Lease::InMemory
                 activeLease.Lease.Id.Value,
                 activeLease.Lease.Resource.Value,
                 activeLease.Lease.Duration.count());
-            return activeLease.Lease;
+            return Api::LeaseGrant{
+                .Lease = activeLease.Lease,
+                .Secret = activeLease.Secret};
         }
 
         SPDLOG_LOGGER_ERROR(m_Logger, "Failed to generate unique lease id for resource '{}'", request.Resource.Value);
@@ -180,6 +203,33 @@ namespace PiSubmarine::Lease::InMemory
             leaseIterator->second.Lease.Resource.Value);
         m_ActiveLeases.erase(leaseIterator);
         return {};
+    }
+
+    Error::Api::Result<Api::LeaseSecret> Manager::GetLeaseSecret(const Api::LeaseId& leaseId) const
+    {
+        if (const auto leaseIdValidation = ValidateLeaseId(leaseId); !leaseIdValidation)
+        {
+            return std::unexpected(leaseIdValidation.error());
+        }
+
+        const auto now = m_Clock();
+        std::scoped_lock lock(m_Mutex);
+
+        const auto leaseIterator = m_ActiveLeases.find(leaseId.Value);
+        if (leaseIterator == m_ActiveLeases.end())
+        {
+            SPDLOG_LOGGER_WARN(m_Logger, "Failed to get secret for unknown lease '{}'", leaseId.Value);
+            return std::unexpected(MakeDeviceError(Api::ErrorCode::LeaseNotFound));
+        }
+
+        if (leaseIterator->second.ExpiresAt <= now)
+        {
+            m_ActiveLeases.erase(leaseIterator);
+            SPDLOG_LOGGER_WARN(m_Logger, "Failed to get secret for expired lease '{}'", leaseId.Value);
+            return std::unexpected(MakeDeviceError(Api::ErrorCode::LeaseExpired));
+        }
+
+        return leaseIterator->second.Secret;
     }
 
     Error::Api::Result<Api::LeaseValidation> Manager::ValidateLease(
@@ -294,6 +344,17 @@ namespace PiSubmarine::Lease::InMemory
         return Api::LeaseId{.Value = std::move(encoded)};
     }
 
+    Error::Api::Result<Api::LeaseSecret> Manager::GenerateSecureLeaseSecret()
+    {
+        std::vector<std::byte> secret(LeaseSecretByteCount);
+        if (RAND_bytes(reinterpret_cast<unsigned char*>(secret.data()), static_cast<int>(secret.size())) != 1)
+        {
+            return std::unexpected(MakeDeviceError(Api::ErrorCode::LeaseSecretGenerationFailed));
+        }
+
+        return Api::LeaseSecret{.Value = std::move(secret)};
+    }
+
     Error::Api::Result<void> Manager::ValidateResourceId(const Api::ResourceId& resourceId)
     {
         if (resourceId.Value.empty())
@@ -309,6 +370,16 @@ namespace PiSubmarine::Lease::InMemory
         if (leaseId.Value.empty())
         {
             return std::unexpected(MakeContractError(Api::ErrorCode::InvalidLeaseId));
+        }
+
+        return {};
+    }
+
+    Error::Api::Result<void> Manager::ValidateLeaseSecret(const Api::LeaseSecret& leaseSecret)
+    {
+        if (leaseSecret.Value.empty())
+        {
+            return std::unexpected(MakeContractError(Api::ErrorCode::InvalidLeaseSecret));
         }
 
         return {};
