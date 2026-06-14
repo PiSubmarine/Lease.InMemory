@@ -38,6 +38,37 @@
       }
     },
     {
+      "name": "windows-mingw-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/toolchains/mingw.cmake",
+        "VCPKG_HOST_TRIPLET": "x64-mingw-static",
+        "VCPKG_TARGET_TRIPLET": "x64-mingw-static"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "vendor": {
+        "jetbrains.com/clion": {
+          "toolchain": "MinGW"
+        }
+      }
+    },
+    {
+      "name": "windows-mingw-debug",
+      "displayName": "Windows MinGW Debug",
+      "inherits": "windows-mingw-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
       "name": "pisubmarine-ssh-debug",
       "displayName": "PiSubmarine SSH Debug",
       "generator": "Ninja",
@@ -103,6 +134,31 @@
         "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "/home/dmitriy/vcpkg/scripts/toolchains/mingw.cmake",
         "VCPKG_HOST_TRIPLET": "x64-linux",
         "VCPKG_TARGET_TRIPLET": "x64-mingw-static"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": {
+          "sourceDir": "$env{HOME}/.vs/$ms{projectDirName}"
+        },
+        "jetbrains.com/clion": {
+          "toolchain": "PiSubmarine WSL2"
+        }
+      }
+    },
+    {
+      "name": "linux-wsl2-debug",
+      "displayName": "Linux WSL2 Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_SYSTEM_NAME": "Linux",
+        "CMAKE_SYSTEM_PROCESSOR": "x86_64",
+        "CMAKE_C_COMPILER": "/usr/bin/gcc",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+        "CMAKE_TOOLCHAIN_FILE": "/home/dmitriy/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_HOST_TRIPLET": "x64-linux",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
       },
       "vendor": {
         "microsoft.com/VisualStudioRemoteSettings/CMake/1.0": {
