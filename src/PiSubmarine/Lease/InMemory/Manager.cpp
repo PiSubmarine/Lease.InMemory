@@ -173,7 +173,7 @@ namespace PiSubmarine::Lease::InMemory
         }
 
         leaseIterator->second.ExpiresAt = now + leaseIterator->second.Lease.Duration;
-        SPDLOG_LOGGER_INFO(
+        SPDLOG_LOGGER_DEBUG(
             m_Logger,
             "Renewed lease '{}' for resource '{}'",
             leaseIterator->second.Lease.Id.Value,
