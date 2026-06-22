@@ -140,7 +140,7 @@ namespace PiSubmarine::Lease::InMemory
                 activeLease.Lease.Resource.Value,
                 activeLease.Lease.Duration.count());
             return Api::LeaseGrant{
-                .Lease = activeLease.Lease,
+                .GrantedLease = activeLease.Lease,
                 .Secret = activeLease.Secret};
         }
 
