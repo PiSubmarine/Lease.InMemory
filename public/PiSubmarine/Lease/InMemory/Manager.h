@@ -31,8 +31,8 @@ namespace PiSubmarine::Lease::InMemory
         explicit Manager(
             Logging::Api::IFactory& loggerFactory,
             Clock clock = [] { return std::chrono::steady_clock::now(); },
-            LeaseIdGenerator leaseIdGenerator = {},
-            LeaseSecretGenerator leaseSecretGenerator = {});
+            LeaseIdGenerator leaseIdGenerator = nullptr,
+            LeaseSecretGenerator leaseSecretGenerator = nullptr);
 
         [[nodiscard]] Error::Api::Result<Api::LeaseGrant> AcquireLease(const Api::LeaseRequest& request) override;
         [[nodiscard]] Error::Api::Result<Api::Lease> RenewLease(const Api::LeaseId& leaseId) override;
